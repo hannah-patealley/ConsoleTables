@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
 using Wcwidth;
@@ -162,11 +163,11 @@ namespace ConsoleTables
             // create the divider
             var divider = " " + string.Join("", Enumerable.Repeat("-", longestLine - 1)) + " ";
 
-			if(Options.IncludeHeaderRow)
-			{
-				builder.AppendLine(divider);
-				builder.AppendLine(columnHeaders);
-			}
+            if(Options.IncludeHeaderRow)
+            {
+                builder.AppendLine(divider);
+                builder.AppendLine(columnHeaders);
+            }
 
             foreach (var row in results)
             {
@@ -239,11 +240,11 @@ namespace ConsoleTables
             var divider = Regex.Replace(columnHeaders, "[^|]", "-");
 
 
-			if (Options.IncludeHeaderRow)
-			{
-				builder.AppendLine(columnHeaders);
-				builder.AppendLine(divider);
-			}
+            if (Options.IncludeHeaderRow)
+            {
+                builder.AppendLine(columnHeaders);
+                builder.AppendLine(divider);
+            }
 
             results.ForEach(row => builder.AppendLine(row));
 
@@ -269,11 +270,11 @@ namespace ConsoleTables
             var divider = Regex.Replace(columnHeaders, "[^| ]", "-");
             var dividerPlus = divider.Replace("|", "+");
 
-			if (Options.IncludeHeaderRow)
-			{
-				builder.AppendLine(dividerPlus);
-				builder.AppendLine(columnHeaders);
-			}
+            if (Options.IncludeHeaderRow)
+            {
+                builder.AppendLine(dividerPlus);
+                builder.AppendLine(columnHeaders);
+            }
 
             foreach (var row in results)
             {
@@ -345,9 +346,18 @@ namespace ConsoleTables
             }
         }
 
+        private static bool IsIgnored(ICustomAttributeProvider property)
+        {
+            object[] ignoreAttributes = property.GetCustomAttributes(typeof(IgnoreAttribute), true);
+            return ignoreAttributes.Any();
+        }
+
         private static IEnumerable<string> GetColumns<T>()
         {
-            return typeof(T).GetProperties().Select(x => x.Name).ToArray();
+            return typeof(T).GetProperties()
+                .Where(x => !IsIgnored(x))
+                .Select(x => x.Name)
+                .ToArray();
         }
 
         private static object GetColumnValue<T>(object target, string column)
@@ -357,7 +367,10 @@ namespace ConsoleTables
 
         private static IEnumerable<Type> GetColumnsType<T>()
         {
-            return typeof(T).GetProperties().Select(x => x.PropertyType).ToArray();
+            return typeof(T).GetProperties()
+                .Where(x => !IsIgnored(x))
+                .Select(x => x.PropertyType)
+                .ToArray();
         }
     }
 
@@ -376,11 +389,11 @@ namespace ConsoleTables
         /// </summary>
         public TextWriter OutputTo { get; set; } = Console.Out;
 
-		public bool IncludeHeaderRow { get; set; } = true;
+        public bool IncludeHeaderRow { get; set; } = true;
 
-	}
+    }
 
-	public enum Format
+    public enum Format
     {
         Default = 0,
         MarkDown = 1,
