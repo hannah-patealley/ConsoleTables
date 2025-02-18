@@ -1,11 +1,11 @@
 ﻿using System;
 
-namespace ConsoleTables
+namespace ConsoleTables.Attributes
 {
     [AttributeUsage(
         AttributeTargets.Field |
         AttributeTargets.Property )]
-    public class IgnoreAttribute : System.Attribute
+    public class IgnoreAttribute : Attribute
     {
         public IgnoreAttribute()
         { }

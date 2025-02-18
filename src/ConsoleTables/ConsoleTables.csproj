@@ -58,4 +58,8 @@
       <Link>Properties\icon.png</Link>
     </None>
   </ItemGroup>
+
+	<ItemGroup>
+		<InternalsVisibleTo Include="ConsoleTables.Tests" />
+	</ItemGroup>
 </Project>

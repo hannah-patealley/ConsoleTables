@@ -7,18 +7,22 @@ using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
 using Wcwidth;
+using ConsoleTables.Models;
+using System.Data.Common;
 
 namespace ConsoleTables
 {
     public class ConsoleTable
     {
-        public IList<object> Columns { get; }
-        public IList<object[]> Rows { get; }
+		public string CellDivider { get; private set; }
+        public IList<Column> Columns { get; }
+        public IList<string> ColumnNames { get => Columns.Select(x => x.Name).ToList(); }
+		public IList<Row> Rows { get; }
 
-        public ConsoleTableOptions Options { get; }
-        public Type[] ColumnTypes { get; private set; }
+		public Dictionary<Column, int> ColumnLengths { get; }
+		public Dictionary<Column, string> ColumnAlignment { get; }
 
-        public IList<string> Formats { get; private set; }
+		public ConsoleTableOptions Options { get; }
 
         public static readonly HashSet<Type> NumericTypes = new HashSet<Type>
         {
@@ -28,22 +32,44 @@ namespace ConsoleTables
             typeof(uint), typeof(float)
         };
 
-        public ConsoleTable(params string[] columns)
-            : this(new ConsoleTableOptions { Columns = new List<string>(columns) })
-        {
-        }
+		internal ConsoleTable()
+			: this(new ConsoleTableOptions())
+		{
+		}
 
-        public ConsoleTable(ConsoleTableOptions options)
+		public ConsoleTable(params string[] columns)
+            : this(new ConsoleTableOptions { ColumnNames = new List<string>(columns) })
+        {
+		}
+
+		public ConsoleTable(IEnumerable<Column> columns)
+			: this(new ConsoleTableOptions())
+		{
+			Columns = columns.ToList();
+		}
+
+		public ConsoleTable(ConsoleTableOptions options)
         {
             Options = options ?? throw new ArgumentNullException("options");
-            Rows = new List<object[]>();
-            Columns = new List<object>(options.Columns);
-        }
+            Rows = new List<Row>();
+            Columns = options.ColumnNames.Select(Column.FromString).ToList();
+			ColumnLengths = new Dictionary<Column, int>();
+			ColumnAlignment = new Dictionary<Column, string>();
+			CellDivider = options.CellDivider ?? string.Empty;
+		}
 
-        public ConsoleTable AddColumn(IEnumerable<string> names)
+
+		public ConsoleTable AddColumn(IEnumerable<string> columns)
+		{
+			foreach (var col in columns)
+				Columns.Add(Column.FromString(col));
+			return this;
+		}
+
+		public ConsoleTable AddColumn(IEnumerable<Column> columns)
         {
-            foreach (var name in names)
-                Columns.Add(name);
+            foreach (var col in columns)
+                Columns.Add(col);
             return this;
         }
 
@@ -59,7 +85,12 @@ namespace ConsoleTables
                 throw new Exception(
                     $"The number columns in the row ({Columns.Count}) does not match the values ({values.Length})");
 
-            Rows.Add(values);
+			var row = new Row();
+			for(int i = 0; i < Columns.Count; i++)
+			{
+				row.AddValue(Columns[i], values[i]);
+			}
+			Rows.Add(row);
             return this;
         }
 
@@ -67,45 +98,74 @@ namespace ConsoleTables
         {
             action(Options);
             return this;
-        }
+		}
 
+		public ConsoleTable AddFormattingToColumn(IEnumerable<string> columnNames, Func<object, string> formatter)
+		{
+			return AddFormattingToColumn(list => list.Where(x => columnNames.Contains(x.Name)), formatter);
+		}
 
-        public static ConsoleTable FromDictionary(Dictionary<string, Dictionary<string, object>> values)
-        {
-            var table = new ConsoleTable();
+		public ConsoleTable AddFormattingToColumn(string columnName, Func<object, string> formatter)
+		{
+			return AddFormattingToColumn(list => list.Where(x => x.Name.Equals(columnName)), formatter);
+		}
 
-            var columNames = values.SelectMany(x => x.Value.Keys).Distinct().ToList();
-            columNames.Insert(0, "");
-            table.AddColumn(columNames);
-            foreach (var row in values)
-            {
-                var r = new List<object> { row.Key };
-                foreach (var columName in columNames.Skip(1))
-                {
-                    r.Add(row.Value.TryGetValue(columName, out var value) ? value : "");
-                }
+		public ConsoleTable AddFormattingToColumn(Func<IEnumerable<Column>, Column> columnSelector, Func<object, string> formatter)
+		{
+			return AddFormattingToColumn(list => new Column[] { columnSelector.Invoke(list) }, formatter);
+		}
 
-                table.AddRow(r.Cast<object>().ToArray());
-            }
+		public ConsoleTable AddFormattingToColumn(Func<IEnumerable<Column>, IEnumerable<Column>> columnSelector, Func<object,string> formatter)
+		{
+			IEnumerable<Column> selectedColumns = columnSelector.Invoke(this.Columns);
+			foreach (var column in selectedColumns)
+			{
+				column.StringFormatter = formatter;
+			}
+			return this;
+		}
 
-            return table;
-        }
+		public static ConsoleTable FromDictionary(Dictionary<string, Dictionary<string, object>> values)
+		{
+			var table = new ConsoleTable();
+
+			var columNames = values.SelectMany(x => x.Value.Keys).Distinct().ToList();
+			columNames.Insert(0, "");
+			table.AddColumn(columNames);
+
+			foreach (var row in values)
+			{
+				var rowValues = new List<object> { row.Key };
+				foreach (var columName in columNames.Skip(1))
+				{
+					rowValues.Add(row.Value.TryGetValue(columName, out var value) ? value : "");
+				}
+
+				table.AddRow(rowValues.ToArray());
+			}
+
+			return table;
+		}
 
         public static ConsoleTable From<T>(IEnumerable<T> values)
         {
-            var table = new ConsoleTable
-            {
-                ColumnTypes = GetColumnsType<T>().ToArray()
-            };
+			var columns = new List<Column>();
+			PropertyInfo[] properties = typeof(T).GetProperties();
 
-            var columns = GetColumns<T>().ToList();
+			foreach (PropertyInfo prop in properties)
+			{
+				if (prop.IsIgnored()) continue;
+				columns.Add(Column.FromProperty(prop));
+			}
 
-            table.AddColumn(columns);
+			var table = new ConsoleTable(columns);
 
-            foreach (
-                var propertyValues
-                in values.Select(value => columns.Select(column => GetColumnValue<T>(value, column)))
-            ) table.AddRow(propertyValues.ToArray());
+			foreach(var item in values)
+			{
+				var properyNames = table.Columns.Select(c => c.Name);
+				object[] rowValues = properyNames.Select(p => typeof(T).GetProperty(p).GetValue(item)).ToArray();
+				table.AddRow(rowValues);
+			}
 
             return table;
         }
@@ -131,201 +191,138 @@ namespace ConsoleTables
             return table;
         }
 
-        public override string ToString()
-        {
-            var builder = new StringBuilder();
 
-            // find the longest column by searching each row
-            var columnLengths = ColumnLengths();
+		public string ToString(Func<Row, string> rowFormatFunc, Func<int, string> rowDividerFunc, bool divideAllRows = true)
+		{
+			SetColumnLengths();
+			SetNumberAlignment();
 
-            // set right alinment if is a number
-            var columnAlignment = Enumerable.Range(0, Columns.Count)
-                .Select(GetNumberAlignment)
-                .ToList();
+			Row headerRow = new Row(Columns.Select(x => new RowValue(x, x.Name)))
+			{
+				IsHeader = true
+			};
+			string headerRowString = rowFormatFunc.Invoke(headerRow);
 
-            // create the string format with padding ; just use for maxRowLength
-            var format = Enumerable.Range(0, Columns.Count)
-                .Select(i => " | {" + i + "," + columnAlignment[i] + columnLengths[i] + "}")
-                .Aggregate((s, a) => s + a) + " |";
+			var rowDivider = rowDividerFunc.Invoke(headerRowString.Length);
 
-            SetFormats(ColumnLengths(), columnAlignment);
+			var builder = new StringBuilder();
+			if (Options.IncludeHeaderRow)
+			{
+				if(divideAllRows) builder.AppendLine(rowDivider);
+				builder.AppendLine(headerRowString);
+				builder.AppendLine(rowDivider);
+			}
 
-            // find the longest formatted line
-            var maxRowLength = Math.Max(0, Rows.Any() ? Rows.Max(row => string.Format(format, row).Length) : 0);
-            var columnHeaders = string.Format(Formats[0], Columns.ToArray());
+			foreach (var row in Rows)
+			{
+				builder.AppendLine(rowFormatFunc.Invoke(row));
+				if(divideAllRows) builder.AppendLine(rowDivider);
+			}
 
-            // longest line is greater of formatted columnHeader and longest row
-            var longestLine = Math.Max(maxRowLength, columnHeaders.Length);
+			if (Options.EnableCount)
+			{
+				builder.AppendLine("");
+				builder.AppendFormat(" Count: {0}", Rows.Count);
+			}
 
-            // add each row
-            var results = Rows.Select((row, i) => string.Format(Formats[i + 1], row)).ToList();
+			return builder.ToString();
+		}
 
-            // create the divider
-            var divider = " " + string.Join("", Enumerable.Repeat("-", longestLine - 1)) + " ";
+		public override string ToString()
+		{
+			Func<int, string> rowDivFunc = rowLength =>
+			{
+				return " " + string.Join("", Enumerable.Repeat("-", rowLength-2)) + " ";
+			};
 
-            if(Options.IncludeHeaderRow)
-            {
-                builder.AppendLine(divider);
-                builder.AppendLine(columnHeaders);
-            }
+			return this.ToString(FormatRow, rowDivFunc);
+		}
 
-            foreach (var row in results)
-            {
-                builder.AppendLine(divider);
-                builder.AppendLine(row);
-            }
+		private string ToMarkDownString()
+		{
+			CellDivider = "|";
 
-            builder.AppendLine(divider);
+			Func<int, string> rowDivFunc = rowLength =>
+			{
+				return string.Join(CellDivider, Enumerable.Repeat("---", Columns.Count()));
+			};
 
-            if (Options.EnableCount)
-            {
-                builder.AppendLine("");
-                builder.AppendFormat(" Count: {0}", Rows.Count);
-            }
-
-            return builder.ToString();
-        }
-
-
-        private void SetFormats(List<int> columnLengths, List<string> columnAlignment)
-        {
-            var allLines = new List<object[]>();
-            allLines.Add(Columns.ToArray());
-            allLines.AddRange(Rows);
-
-            Formats = allLines.Select(d =>
-            {
-                return Enumerable.Range(0, Columns.Count)
-                    .Select(i =>
-                    {
-                        var value = d[i]?.ToString() ?? "";
-                        var length = columnLengths[i] - (GetTextWidth(value) - value.Length);
-                        return " | {" + i + "," + columnAlignment[i] + length + "}";
-                    })
-                    .Aggregate((s, a) => s + a) + " |";
-            }).ToList();
-        }
-
-        public static int GetTextWidth(string value)
-        {
-            if (value == null)
-                return 0;
-
-            var length = value.ToCharArray().Sum(c => UnicodeCalculator.GetWidth(c));
-            return length;
-        }
-
-        public string ToMarkDownString()
-        {
-            return ToMarkDownString('|');
-        }
-
-        private string ToMarkDownString(char delimiter)
-        {
-            var builder = new StringBuilder();
-
-            // find the longest column by searching each row
-            var columnLengths = ColumnLengths();
-
-            // create the string format with padding
-            _ = Format(columnLengths, delimiter);
-
-            // find the longest formatted line
-            var columnHeaders = string.Format(Formats[0].TrimStart(), Columns.ToArray());
-
-            // add each row
-            var results = Rows.Select((row, i) => string.Format(Formats[i + 1].TrimStart(), row)).ToList();
-
-            // create the divider
-            var divider = Regex.Replace(columnHeaders, "[^|]", "-");
-
-
-            if (Options.IncludeHeaderRow)
-            {
-                builder.AppendLine(columnHeaders);
-                builder.AppendLine(divider);
-            }
-
-            results.ForEach(row => builder.AppendLine(row));
-
-            return builder.ToString();
-        }
+			return this.ToString(FormatRowWithoutPadding, rowDivFunc, divideAllRows: false);
+		}
 
         public string ToMinimalString()
         {
-            return ToMarkDownString(char.MinValue);
+			CellDivider = "  ";
+
+			Func<int, string> rowDivFunc = rowLength =>
+			{
+				return string.Join(string.Empty, Enumerable.Repeat("-", rowLength));
+			};
+
+			return this.ToString(FormatRow, rowDivFunc, divideAllRows: false);
+		}
+
+		public string ToStringAlternative()
+		{
+			CellDivider = " + ";
+
+			Func<int, string> rowDivFunc = rowLength =>
+			{
+				string div = CellDivider.Trim();
+				List<string> stringParts = new List<string>();
+				stringParts.Add(string.Empty);
+				stringParts.AddRange(ColumnLengths.Select(colLen => string.Join(string.Empty, Enumerable.Repeat("-", colLen.Value+2))));
+				stringParts.Add(string.Empty);
+				return " " + string.Join(div, stringParts) + " ";
+			};
+
+			return this.ToString(FormatRow, rowDivFunc);
         }
 
-        public string ToStringAlternative()
-        {
-            var builder = new StringBuilder();
+		private string FormatRow(Row row) => row.ToString(CellDivider, ColumnLengths, ColumnAlignment);
 
-            // find the longest formatted line
-            var columnHeaders = string.Format(Formats[0].TrimStart(), Columns.ToArray());
+		private string FormatRowWithoutPadding(Row row) => row.ToString(CellDivider);
 
-            // add each row
-            var results = Rows.Select((row, i) => string.Format(Formats[i + 1].TrimStart(), row)).ToList();
 
-            // create the divider
-            var divider = Regex.Replace(columnHeaders, "[^| ]", "-");
-            var dividerPlus = divider.Replace("|", "+");
+		private void SetNumberAlignment()
+		{
+			ColumnAlignment.Clear();
+			foreach (Column column in Columns)
+			{
+				if(Options.NumberAlignment == Alignment.Right
+					&& NumericTypes.Contains(column.Type))
+				{
+					ColumnAlignment.Add(column, "");
+				}
+				else
+				{
+					ColumnAlignment.Add(column, "-");
+				}
+			}
+		}
 
-            if (Options.IncludeHeaderRow)
-            {
-                builder.AppendLine(dividerPlus);
-                builder.AppendLine(columnHeaders);
-            }
+		private void SetColumnLengths()
+		{
+			ColumnLengths.Clear();
+			foreach (var column in Columns)
+			{
+				List<string> values = Rows.Select(row => row.GetValue(column).ToFormattedString()).ToList();
+				values.Add(column.Name);
 
-            foreach (var row in results)
-            {
-                builder.AppendLine(dividerPlus);
-                builder.AppendLine(row);
-            }
-            builder.AppendLine(dividerPlus);
+				int maxLength = values
+					.Where(v => v != null)
+					.Select(v => v.Length)
+					.Max();
 
-            return builder.ToString();
+				ColumnLengths.Add(column, maxLength);
+			}
         }
 
-
-        private string Format(List<int> columnLengths, char delimiter = '|')
-        {
-            // set right alignment if is a number
-            var columnAlignment = Enumerable.Range(0, Columns.Count)
-                .Select(GetNumberAlignment)
-                .ToList();
-
-            SetFormats(columnLengths, columnAlignment);
-
-            var delimiterStr = delimiter == char.MinValue ? string.Empty : delimiter.ToString();
-            var format = (Enumerable.Range(0, Columns.Count)
-                .Select(i => " " + delimiterStr + " {" + i + "," + columnAlignment[i] + columnLengths[i] + "}")
-                .Aggregate((s, a) => s + a) + " " + delimiterStr).Trim();
-            return format;
-        }
-
-        private string GetNumberAlignment(int i)
-        {
-            return Options.NumberAlignment == Alignment.Right
-                    && ColumnTypes != null
-                    && NumericTypes.Contains(ColumnTypes[i])
-                ? ""
-                : "-";
-        }
-
-        private List<int> ColumnLengths()
-        {
-            var columnLengths = Columns
-                .Select((t, i) => Rows.Select(x => x[i])
-                    .Union(new[] { Columns[i] })
-                    .Where(x => x != null)
-                    .Select(x => x.ToString().ToCharArray().Sum(c => UnicodeCalculator.GetWidth(c))).Max())
-                .ToList();
-            return columnLengths;
-        }
 
         public void Write(Format format = ConsoleTables.Format.Default)
         {
-            SetFormats(ColumnLengths(), Enumerable.Range(0, Columns.Count).Select(GetNumberAlignment).ToList());
+			SetColumnLengths();
+			SetNumberAlignment();
 
             switch (format)
             {
@@ -346,37 +343,12 @@ namespace ConsoleTables
             }
         }
 
-        private static bool IsIgnored(ICustomAttributeProvider property)
-        {
-            object[] ignoreAttributes = property.GetCustomAttributes(typeof(IgnoreAttribute), true);
-            return ignoreAttributes.Any();
-        }
-
-        private static IEnumerable<string> GetColumns<T>()
-        {
-            return typeof(T).GetProperties()
-                .Where(x => !IsIgnored(x))
-                .Select(x => x.Name)
-                .ToArray();
-        }
-
-        private static object GetColumnValue<T>(object target, string column)
-        {
-            return typeof(T).GetProperty(column)?.GetValue(target, null);
-        }
-
-        private static IEnumerable<Type> GetColumnsType<T>()
-        {
-            return typeof(T).GetProperties()
-                .Where(x => !IsIgnored(x))
-                .Select(x => x.PropertyType)
-                .ToArray();
-        }
-    }
+	}
 
     public class ConsoleTableOptions
     {
-        public IEnumerable<string> Columns { get; set; } = new List<string>();
+        public IEnumerable<string> ColumnNames { get; set; } = new List<string>();
+
         public bool EnableCount { get; set; } = true;
 
         /// <summary>
@@ -391,7 +363,9 @@ namespace ConsoleTables
 
         public bool IncludeHeaderRow { get; set; } = true;
 
-    }
+        public string CellDivider { get; set; } = " | ";
+
+	}
 
     public enum Format
     {

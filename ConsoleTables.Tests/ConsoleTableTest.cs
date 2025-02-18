@@ -100,9 +100,9 @@ $@" --------------
         [Fact]
         public void TestGetTextWidth()
         {
-            Assert.Equal(3, ConsoleTable.GetTextWidth("abc"));
-            Assert.Equal(3, ConsoleTable.GetTextWidth("äöü"));
-            Assert.Equal(4, ConsoleTable.GetTextWidth("René"));
+            Assert.Equal(3, Utility.GetTextWidth("abc"));
+            Assert.Equal(3, Utility.GetTextWidth("äöü"));
+            Assert.Equal(4, Utility.GetTextWidth("René"));
         }
 
         [Fact]

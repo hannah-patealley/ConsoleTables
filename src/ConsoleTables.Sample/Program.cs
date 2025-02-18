@@ -1,4 +1,5 @@
-﻿using System;
+﻿using ConsoleTables.Attributes;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -35,38 +36,48 @@ static class Program
     }
         
     static void Main(string[] args)
-    {
-        TestDictionaryTable();
+	{
+		Console.WriteLine("Test Dictionary Table:\n");
+		TestDictionaryTable();
+
         var table = new ConsoleTable("one", "two", "three");
         table.AddRow(1, 2, 3)
             .AddRow("this line should be longer 哈哈哈哈", "yes it is", "oh");
 
+		WriteBreak();
         Console.WriteLine("\nFORMAT: Default:\n");
         table.Write();
 
-        Console.WriteLine("\nFORMAT: MarkDown:\n");
+		WriteBreak();
+		Console.WriteLine("\nFORMAT: MarkDown:\n");
         table.Write(Format.MarkDown);
 
-        Console.WriteLine("\nFORMAT: Alternative:\n");
+		WriteBreak();
+		Console.WriteLine("\nFORMAT: Alternative:\n");
         table.Write(Format.Alternative);
         Console.WriteLine();
 
-        Console.WriteLine("\nFORMAT: Minimal:\n");
+		WriteBreak();
+		Console.WriteLine("\nFORMAT: Minimal:\n");
         table.Write(Format.Minimal);
         Console.WriteLine();
 
-        table = new ConsoleTable("I've", "got", "nothing");
+		WriteBreak();
+		table = new ConsoleTable("I've", "got", "nothing");
         table.Write();
         Console.WriteLine();
 
         var rows = Enumerable.Repeat(new Something(), 10);
 
+		WriteBreak();
+		ConsoleTable.From(rows).Write();
+
+		WriteBreak();
+		rows = Enumerable.Repeat(new Something(), 0);
         ConsoleTable.From(rows).Write();
 
-        rows = Enumerable.Repeat(new Something(), 0);
-        ConsoleTable.From(rows).Write();
-
-        Console.WriteLine("\nNumberAlignment = Alignment.Right\n");
+		WriteBreak();
+		Console.WriteLine("\nNumberAlignment = Alignment.Right\n");
         rows = Enumerable.Repeat(new Something(), 2);
         ConsoleTable
             .From(rows)
@@ -76,13 +87,15 @@ static class Program
         var noCount =
             new ConsoleTable(new ConsoleTableOptions
             {
-                Columns = new[] { "one", "two", "three" },
+                ColumnNames = new[] { "one", "two", "three" },
                 EnableCount = false
             });
 
-        noCount.AddRow(1, 2, 3).Write();
+		WriteBreak();
+		noCount.AddRow(1, 2, 3).Write();
 
-        Console.WriteLine("\nHeader Row Excluded From Output");
+		WriteBreak();
+		Console.WriteLine("Header Row Excluded From Output:");
         table = new ConsoleTable("Header1", "Header2", "Header3");
         table.AddRow("valA1", "valA2", "valA3");
         table.AddRow("valB1", "valB2", "valB3");
@@ -91,8 +104,21 @@ static class Program
             .Configure(o => o.IncludeHeaderRow = false)
             .Write(Format.Minimal);
 
-        Console.ReadKey();
+		WriteBreak();
+		var rowsWithFormatting = Enumerable.Repeat(new SomethingWithFormatting(), 3);
+		Console.WriteLine("Formatting Columns:");
+		ConsoleTable
+		   .From(rowsWithFormatting)
+		   .AddFormattingToColumn(nameof(SomethingWithFormatting.FunctionFormatted), SomethingWithFormatting.FormatString)
+		   .Write();
+
+		Console.ReadKey();
     }
+
+	private static void WriteBreak()
+	{
+		Console.WriteLine("\n\n" + string.Join(string.Empty, Enumerable.Repeat("=", Console.WindowWidth)) + "\n");
+	}
 }
 
 public class Something
@@ -102,4 +128,23 @@ public class Something
     public DateTime Date { get; set; } = DateTime.Now;
     public int NumberOfChildren { get; set; }
     [Ignore] public string IgnoreMe { get; set; } = "I should not be displayed";
+}
+
+public class SomethingWithFormatting
+{
+	public string Id { get; set; } = Guid.NewGuid().ToString("N");
+	public DateTime Date { get; set; } = DateTime.Now;
+	public int NumberOfChildren { get; set; }
+	[Format("Formatted by Attribute: '{0}'")] public string AttributeFormatted { get => Id.ToString(); }
+	public string FunctionFormatted { get => Id.ToString(); }
+
+	public static string FormatString(object obj)
+	{
+		if (obj == null) return "NULL";
+
+		string str = obj as string;
+		if (str == null) return "NOT STRING";
+
+		return $"Formatted by Function: '{str}'";
+	}
 }
