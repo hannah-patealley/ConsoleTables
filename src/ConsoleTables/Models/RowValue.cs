@@ -5,7 +5,19 @@ namespace ConsoleTables.Models
     public class RowValue
     {
 		public Column Column { get; set; }
-		public object Value { get; set; }
+		private object _value;
+		public object Value
+		{
+			get
+			{
+				if (_value == null) return string.Empty;
+				else return _value;
+			}
+			set
+			{
+				_value = value;
+			}
+		}
 
 		public RowValue(Column column)
 		{
