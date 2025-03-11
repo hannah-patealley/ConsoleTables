@@ -9,17 +9,20 @@ namespace ConsoleTables.Models
 		public Type Type { get; set; }
 		public Func<object,string> StringFormatter { get; set; }
 
-		public Column(string name)
+		public Column(string name, Type type)
 		{
 			Name = name;
-			Type = typeof(object);
+			Type = type;
 			StringFormatter = x => x.ToString();
 		}
 
+		public Column(string name)
+			: this(name, typeof(object))
+		{ }
+
 		public Column(PropertyInfo property)
-			: this(property.Name)
+			: this(property.Name, property.PropertyType)
 		{
-			Type = property.PropertyType;
 			StringFormatter = property.GetFormatter();
 		}
 

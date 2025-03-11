@@ -58,7 +58,6 @@ namespace ConsoleTables
 			CellDivider = options.CellDivider ?? string.Empty;
 		}
 
-
 		public ConsoleTable AddColumn(IEnumerable<string> columns)
 		{
 			foreach (var col in columns)
@@ -66,35 +65,47 @@ namespace ConsoleTables
 			return this;
 		}
 
+		public ConsoleTable AddColumn(IEnumerable<Tuple<string,Type>> columnInfo)
+		{
+			foreach (var col in columnInfo)
+				Columns.Add(new Column(col.Item1, col.Item2));
+			return this;
+		}
+
 		public ConsoleTable AddColumn(IEnumerable<Column> columns)
-        {
-            foreach (var col in columns)
-                Columns.Add(col);
-            return this;
-        }
+		{
+			foreach (var col in columns)
+				Columns.Add(col);
+			return this;
+		}
 
         public ConsoleTable AddRow(params object[] values)
         {
-            if (values == null)
-                throw new ArgumentNullException(nameof(values));
+			return AddRow(values.ToList());
+		}
 
-            if (!Columns.Any())
-                throw new Exception("Please set the columns first");
+		public ConsoleTable AddRow(List<object> values)
+		{
+			if (values == null)
+				throw new ArgumentNullException(nameof(values));
 
-            if (Columns.Count != values.Length)
-                throw new Exception(
-                    $"The number columns in the row ({Columns.Count}) does not match the values ({values.Length})");
+			if (!Columns.Any())
+				throw new Exception("Please set the columns first");
+
+			if (Columns.Count != values.Count())
+				throw new Exception(
+					$"The number columns in the row ({Columns.Count}) does not match the values ({values.Count()})");
 
 			var row = new Row();
-			for(int i = 0; i < Columns.Count; i++)
+			for (int i = 0; i < Columns.Count; i++)
 			{
 				row.AddValue(Columns[i], values[i]);
 			}
 			Rows.Add(row);
-            return this;
-        }
+			return this;
+		}
 
-        public ConsoleTable Configure(Action<ConsoleTableOptions> action)
+		public ConsoleTable Configure(Action<ConsoleTableOptions> action)
         {
             action(Options);
             return this;
@@ -238,7 +249,7 @@ namespace ConsoleTables
 			return this.ToString(FormatRow, rowDivFunc);
 		}
 
-		private string ToMarkDownString()
+		internal string ToMarkDownString()
 		{
 			CellDivider = "|";
 
